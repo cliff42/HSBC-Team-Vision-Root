@@ -1,0 +1,25 @@
+{
+  "name": "fat6-hook-handler",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cliff42/fat6-hook-handler.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/cliff42/fat6-hook-handler/issues"
+  },
+  "homepage": "https://github.com/cliff42/fat6-hook-handler#readme",
+  "dependencies": {
+    "body-parser": "^1.19.2",
+    "express": "^4.17.3",
+    "ws": "^8.5.0"
+  }
+}

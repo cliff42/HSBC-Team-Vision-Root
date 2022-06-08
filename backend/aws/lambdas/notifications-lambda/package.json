@@ -1,0 +1,28 @@
+{
+  "name": "notifications-lambda",
+  "version": "0.0.1",
+  "author": "Matthew Wilson",
+  "description": "lambda function to handle sending scheduled meeting notifications",
+  "engines": {
+    "npm": ">=6",
+    "node": ">=14 <15"
+  },
+  "main": "index.ts",
+  "scripts": {
+    "start": "npm i && tsc"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.73",
+    "@types/node": "^14.14.37",
+    "aws-sdk": "^2.1102.0",
+    "ts-node": "^9.1.1",
+    "typescript": "^4.4.4"
+  },
+  "files": [
+    "/dist",
+    "/test"
+  ],
+  "dependencies": {
+    "timezonecomplete": "^5.12.4"
+  }
+}
