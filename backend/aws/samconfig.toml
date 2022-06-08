@@ -1,0 +1,12 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "FAT6-CALI-BRANCH"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-x9if6gpbjm9f"
+s3_prefix = "FAT6-CALI-BRANCH"
+region = "us-west-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+image_repositories = []

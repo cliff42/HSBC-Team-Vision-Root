@@ -1,0 +1,844 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function:
+    Environment:
+      Variables:
+        WEBSOCKET_ENDPOINT: !Sub ${Fat6WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/v1
+Resources:
+  # WEBSOCKET API
+  Fat6WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: Fat6WebSocketApi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  # DATABASE
+  UserDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      TableName: 'UserData'
+      AttributeDefinitions: 
+        - AttributeName: UserID
+          AttributeType: S
+        - AttributeName: zoomId
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: UserID
+          KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      GlobalSecondaryIndexes:
+        - IndexName: ZoomGSI
+          KeySchema: 
+          - AttributeName: zoomId
+            KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput: 
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+
+  ActiveMeetingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      TableName: 'ActiveMeetings'
+      AttributeDefinitions: 
+        - AttributeName: MeetingID
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: MeetingID
+          KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  GroupsTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      TableName: 'Groups'
+      AttributeDefinitions: 
+        - AttributeName: GroupID
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: GroupID
+          KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  ScheduledMeetingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      TableName: 'ScheduledMeetings'
+      AttributeDefinitions: 
+        - AttributeName: MeetingID
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: MeetingID
+          KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  # AUTHORIZER
+  Auth:
+    Type: "AWS::ApiGatewayV2::Authorizer"
+    Properties:
+      Name: Firebase-Authorizer
+      ApiId: !Ref Fat6WebSocketApi
+      AuthorizerType: REQUEST
+      AuthorizerUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaRequestAuthFunction.Arn}/invocations
+      IdentitySource:
+        - "route.request.querystring.token"
+
+  # LAMBDA FUNCTIONS
+  LambdaRequestAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 10
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/auth-lambda/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          FIREBASE_CREDENTIALS: "{{resolve:ssm:/FirebaseServiceKey:1}}"
+
+  NotificationLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: NotificationLambdaFunction
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/notifications-lambda/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+        - AmazonEventBridgeFullAccess
+        - AWSLambda_FullAccess
+  CreateMeetingLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/create-meeting/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+        - AmazonEventBridgeFullAccess
+        - AWSLambda_FullAccess
+      Environment:
+        Variables:
+         ZOOM_API_KEY: "{{resolve:ssm:/ZoomAPIKey:1}}"
+         ZOOM_API_SECRET: "{{resolve:ssm:/ZoomAPISecret:1}}"    
+         NOTIFICATION_FUNCTION_ARN: !Sub ${NotificationLambdaFunction.Arn}
+        
+  GetActiveMeetingsLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/get-active-meetings/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+  GetCalendarMeetingsLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/get-calendar-meetings-lambda/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          ZOOM_API_KEY: '{{resolve:ssm:/ZoomAPIKey:1}}'
+          ZOOM_API_SECRET: '{{resolve:ssm:/ZoomAPISecret:1}}'
+  GroupLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/group-lambda/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+  AddUserLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/add-user/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+  ZoomWebhooksLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 150
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/zoom-webhooks/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+         ZOOM_API_KEY: "{{resolve:ssm:/ZoomAPIKey:1}}"
+         ZOOM_API_SECRET: "{{resolve:ssm:/ZoomAPISecret:1}}"
+         NOTIF_EMAIL: "{{resolve:ssm:/NOTIF_EMAIL:1}}"
+         NOTIF_EMAIL_PASSWORD: "{{resolve:ssm:/NOTIF_EMAIL_PASSWORD:1}}"
+
+  GetUsersLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/get-users/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+  GetUserLocationsLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/get-user-locations/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+  GetProfileInfoLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/get-profile-info/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+  FavouritesLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ./dist/index.handler
+      Timeout: 30
+      Runtime: nodejs14.x
+      CodeUri: ./lambdas/favourites-lambda/
+      Policies:
+        - AmazonAPIGatewayInvokeFullAccess
+        - AmazonDynamoDBFullAccess
+        - AWSLambdaBasicExecutionRole
+
+  # ROUTES AND INTEGRATIONS
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: "$connect"
+      AuthorizationType: CUSTOM
+      OperationName: ConnectRoute
+      AuthorizerId: !Ref Auth
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref ConnectLambdaIntegration
+  ConnectLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Connect Lambda Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: Fat6WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target:
+        Fn::Join:
+        - /
+        - - integrations
+          - Ref: DisconnectLambdaIntegration
+  DisconnectLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: Fat6WebSocketApi
+      Description: Disconnect Lambda Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: Fat6WebSocketApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target:
+        Fn::Join:
+        - /
+        - - integrations
+          - Ref: DefaultLambdaIntegration
+  DefaultLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: Fat6WebSocketApi
+      Description: Default Lambda Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  
+  CreateMeetingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: createMeeting
+      AuthorizationType: NONE
+      OperationName: CreateMeetingRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref CreateMeetingLambdaIntegration
+  CreateMeetingLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Create Meeting Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateMeetingLambdaFunction.Arn}/invocations
+  CreateScheduledMeetingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: createScheduledMeeting
+      AuthorizationType: NONE
+      OperationName: CreateScheduledMeetingRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref CreateScheduledMeetingLambdaIntegration
+  CreateScheduledMeetingLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Create Scheduled Meeting Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateMeetingLambdaFunction.Arn}/invocations
+  GetActiveMeetingsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getActiveMeetings
+      AuthorizationType: NONE
+      OperationName: GetActiveMeetingsRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetActiveMeetingsLambdaIntegration
+  GetActiveMeetingsLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get Active Meetings Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetActiveMeetingsLambdaFunction.Arn}/invocations
+  GetOwnCalendarMeetingsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getOwnCalendarMeetings
+      AuthorizationType: NONE
+      OperationName: GetOwnCalendarMeetingsRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetOwnCalendarMeetingsLambdaIntegration
+  GetOwnCalendarMeetingsLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get Own Calendar Meetings Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetCalendarMeetingsLambdaFunction.Arn}/invocations
+  GetUserCalendarMeetingsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getUserCalendarMeetings
+      AuthorizationType: NONE
+      OperationName: GetUserCalendarMeetingsRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetUserCalendarMeetingsLambdaIntegration
+  GetUserCalendarMeetingsLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get Own Calendar Meetings Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetCalendarMeetingsLambdaFunction.Arn}/invocations
+  GetGroupsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getGroups
+      AuthorizationType: NONE
+      OperationName: GetGroupsRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetGroupsLambdaIntegration
+  GetGroupsLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get a list of user's groups
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GroupLambdaFunction.Arn}/invocations
+  CreateGroupRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: createGroup
+      AuthorizationType: NONE
+      OperationName: CreateGroupRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref CreateGroupLambdaIntegration
+  CreateGroupLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Create a new group with specified details
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GroupLambdaFunction.Arn}/invocations
+  EditGroupRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: editGroup
+      AuthorizationType: NONE
+      OperationName: EditGroupRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref EditGroupLambdaIntegration
+  EditGroupLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Edit an existing group
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GroupLambdaFunction.Arn}/invocations
+  DeleteGroupRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: deleteGroup
+      AuthorizationType: NONE
+      OperationName: DeleteGroupRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DeleteGroupLambdaIntegration
+  DeleteGroupLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Delete an existing group
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GroupLambdaFunction.Arn}/invocations
+  AddUserRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: addUser
+      AuthorizationType: NONE
+      OperationName: AddUserRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref AddUserLambdaIntegration
+  AddUserLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Add a new user
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddUserLambdaFunction.Arn}/invocations
+  UserJoinedMeetingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: userJoinedMeeting
+      AuthorizationType: NONE
+      OperationName: UserJoinedMeetingRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref UserJoinedMeetingLambdaIntegration
+  UserJoinedMeetingLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: User Joined Meeting Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  UserLeftMeetingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: userLeftMeeting
+      AuthorizationType: NONE
+      OperationName: UserLeftMeetingRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref UserLeftMeetingLambdaIntegration
+  UserLeftMeetingLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: User Left Meeting Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  MeetingCreatedRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: meetingCreated
+      AuthorizationType: NONE
+      OperationName: MeetingCreatedRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref MeetingCreatedLambdaIntegration
+  MeetingCreatedLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Meeting Created Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  MeetingStartedRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Ref: Fat6WebSocketApi
+      RouteKey: meetingStarted
+      AuthorizationType: NONE
+      OperationName: MeetingStartedRoute
+      Target:
+        Fn::Join:
+        - /
+        - - integrations
+          - Ref: MeetingStartedLambdaIntegration
+  MeetingStartedLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Ref: Fat6WebSocketApi
+      Description: Meeting Started Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  MeetingEndedRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: meetingEnded
+      AuthorizationType: NONE
+      OperationName: MeetingEndedRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref MeetingEndedLambdaIntegration
+  MeetingEndedLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Meeting Ended Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ZoomWebhooksLambdaFunction.Arn}/invocations
+  GetUsersRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getUsers
+      AuthorizationType: NONE
+      OperationName: GetUsersRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetUsersLambdaIntegration
+  GetUsersLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get Users Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUsersLambdaFunction.Arn}/invocations
+  GetProfileInfoRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getProfileInfo
+      AuthorizationType: NONE
+      OperationName: GetProfileInfoRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetProfileInfoLambdaIntegration
+  GetProfileInfoLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get Profile Info Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetProfileInfoLambdaFunction.Arn}/invocations                             
+  GetUserLocationsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getUserLocations
+      AuthorizationType: NONE
+      OperationName: GetUserLocationsRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetUserLocationsLambdaIntegration          
+  GetUserLocationsLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get User Locations Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUserLocationsLambdaFunction.Arn}/invocations  
+  UpdateFavouritesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: updateFavourites
+      AuthorizationType: NONE
+      OperationName: UpdateFavouritesRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref UpdateFavouritesLambdaIntegration
+  UpdateFavouritesLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Update Favourite Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FavouritesLambdaFunction.Arn}/invocations       
+  GetFavouritesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      RouteKey: getFavourites
+      AuthorizationType: NONE
+      OperationName: GetFavouritesRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetFavouritesLambdaIntegration
+  GetFavouritesLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+      Description: Get Favourites Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub:
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FavouritesLambdaFunction.Arn}/invocations       
+
+  # DEPLOYMENT
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+    - ConnectRoute
+    Properties:
+      ApiId: !Ref Fat6WebSocketApi
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: v1
+      Description: Version 1 'stage'
+      DeploymentId: !Ref Deployment
+      ApiId: !Ref Fat6WebSocketApi
+  # PERMISSIONS
+  PortfolioBlocksPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - CreateMeetingLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CreateMeetingLambdaFunction
+      Principal: apigateway.amazonaws.com
+  GetActiveMeetingsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - GetActiveMeetingsLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetActiveMeetingsLambdaFunction
+      Principal: apigateway.amazonaws.com
+  ZoomWebhooksFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ZoomWebhooksLambdaFunction
+      Principal: apigateway.amazonaws.com
+  GetUsersFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - GetUsersLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetUsersLambdaFunction
+      Principal: apigateway.amazonaws.com
+  GetProfileInfoPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - GetProfileInfoLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetProfileInfoLambdaFunction
+      Principal: apigateway.amazonaws.com        
+  GetUserLocationsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - GetUserLocationsLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetUserLocationsLambdaFunction
+      Principal: apigateway.amazonaws.com  
+  FavouritesFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - FavouritesLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FavouritesLambdaFunction
+      Principal: apigateway.amazonaws.com
+  GetCalendarMeetingsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - GetCalendarMeetingsLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetCalendarMeetingsLambdaFunction
+      Principal: apigateway.amazonaws.com
+  GroupFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - GetGroupsRoute
+      - GroupLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GroupLambdaFunction
+      Principal: apigateway.amazonaws.com
+  AddUserFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - AddUserRoute
+      - AddUserLambdaFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AddUserLambdaFunction
+      Principal: apigateway.amazonaws.com
+  AuthorizerFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - Fat6WebSocketApi
+      - LambdaRequestAuthFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LambdaRequestAuthFunction
+      Principal: apigateway.amazonaws.com
+
+
+      
