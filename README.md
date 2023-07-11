@@ -10,4 +10,4 @@ An HSBC-specified virtual office meeting platform created with React and built a
 - [Willem van Doorn](https://github.com/Willem-vd)
 - [Shane Labelle](https://github.com/shanelabelle)
 - [Sasha Maximovitch](https://github.com/TheEpicWatermelon)
-- [Matt Wilson](https://github.com/mattwilson720)
+- [Matt Wilson](https://github.com/mattkwilson)
